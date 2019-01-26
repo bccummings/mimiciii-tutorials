@@ -1,5 +1,5 @@
 # mimiciii-tutorials
-Tutorials in R, Rmd, and the (MIMIC-III)[https://mimic.physionet.org/] dataset for the University of Michigan SOCR and MDP programs. For more tutorials, please visit the excellent MIT Laboratory of Computational Physiology [GitHub repository](https://github.com/MIT-LCP/mimic-code).
+Tutorials in R, Rmd, and the [MIMIC-III](https://mimic.physionet.org/) dataset for the University of Michigan SOCR and MDP programs. For more tutorials, please visit the excellent MIT Laboratory of Computational Physiology [GitHub repository](https://github.com/MIT-LCP/mimic-code).
 
 ## Purpose
 
