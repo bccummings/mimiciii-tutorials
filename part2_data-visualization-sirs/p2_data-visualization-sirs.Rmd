@@ -1,0 +1,193 @@
+---
+title: "MIMIC-III Tutorial Part 1: Data Extraction"
+author: "<h3><p>Brandon Cummings</p><p>cummingb@med.umich.edu</p></h3>"
+date: "`r format(Sys.time(), '%B %Y')`"
+output:
+  html_document:
+    highlight: tango
+    number_sections: yes
+    theme: default
+    toc: yes
+    toc_depth: 3
+    toc_float:
+      collapsed: yes
+      smooth_scroll: yes
+subtitle: <h2><u>Winter 2019, SOCR-MDP</u></h2>
+---
+
+**Libraries Used:**
+```{r message=F, warning=F}
+# Data I/O
+library('RPostgreSQL')    # access MIMIC-III
+library('reshape2')       # melting dataframes
+library('dplyr')          # misc. organization
+library('DT')     
+
+# Data preparation
+library('psych')          # descriptive stats
+
+# Plots and tables
+library('knitr')          # knitting Rmd to HTML; kable() function
+library('kableExtra')     # extra formating options for knitr tables
+library('ggplot2')        # 2d plotting
+library('ggpubr')         # extra formatting options for ggplot
+```
+
+**Random Seed Set**
+```{r message=F, warning=F}
+set.seed(123456)
+```
+
+# Introduction
+
+In Part I of this tutorial, we created a sample cohort of patients and extracted their diagnosis codes and the physiologic predictors used in the SIRS criteria. First, we'll load in the CSV we wrote in Part I.
+
+```{r eval=T, message=F, warning=F}
+cohort_data <- read.csv('../part1_data-extraction-sirs/sample_data.csv')
+
+kable(head(cohort_data), caption="Sample of cohort data from Part 1") %>%
+  kable_styling(bootstrap_options='striped')
+```
+
+Then, we'll screen the patients based on their ICD9 codes to identify those with sepsis based on a post in <a href=https://stackoverflow.com/questions/50672316/r-test-if-a-string-vector-contains-any-element-of-another-list>Stack Overflow</a>. The codes for sepsis, severe sepsis, and septic shock are 99591, 99592, and 78552 respectively.
+
+```{r eval=T, message=F, warning=F}
+# Search for septic patients
+search_patterns = paste(c(99591, 99592, 78552), collapse="|")
+
+for (i in 1:nrow(cohort_data)){
+  cohort_data$septic[i] <- grepl(search_patterns, cohort_data[i, 'icd9_code'])
+}
+
+kable(head(cohort_data), caption="Sample of cohort data from Part 1 after searching for sepsis diagnosis.") %>%
+  kable_styling(bootstrap_options='striped')
+```
+
+To visualize the relative proportion of patients in the cohort who were septic, I create a pie chart using the graphics package `ggplot2`. While pie-charts are often not ideal, since we only have two categories (septic or not), this is an acceptable use case.
+
+```{r eval=T, message=F, warning=F}
+# Plot pie chart
+fig <- ggplot(cohort_data, aes(x=factor(1), fill=septic)) +
+  geom_bar(width=1) +
+  coord_polar('y') +
+  xlab('') + ylab('') + ggtitle(sprintf('Pie Chart of Septic vs. Non-septic Patients')) +
+  scale_fill_discrete(name='Diagnosed sepsis') +
+  theme(axis.title.x=element_blank(), axis.title.y=element_blank(),
+        axis.text.x=element_blank(), axis.text.y=element_blank(),
+        axis.ticks.x=element_blank(), axis.ticks.y=element_blank(),
+        panel.background=element_blank(), panel.border=element_blank(),
+        panel.grid.major=element_blank(), panel.grid.minor=element_blank(),
+        plot.background=element_blank())
+
+print(fig)
+```
+
+We can see that in our sample of `r nrow(cohort_data)` patients, `r sum(cohort_data$septic == T)` out of `r nrow(cohort_data)` patients (`r sprintf('%.2f%%', sum(cohort_data$septic == T)/nrow(cohort_data)*100)`) were diagnosed with sepsis, severe sepsis, or septic shock.
+
+## Remove missing variables
+
+We'll also choose to remove rows that contain missing variables - this makes visualization and exploratory data analysis easier, while unfortunately reducing our overall sample size.
+
+```{r message=F, warning=F}
+cohort_data = cohort_data[complete.cases(cohort_data),]
+```
+
+After removing rows with missing values, we're left with `r nrow(cohort_data)` subjects. This is still plenty for our analysis. In our new dataset, `r sprintf('%.2f%%', sum(cohort_data$septic == T)/nrow(cohort_data)*100)` of patients were diagnosed with sepsis. This event rate is slightly higher than the before removing missing values - we can theorize that septic patients are likely being monitored especially for SIRS criteria, and thus are more likely to receive the full compliment of tests.
+
+# Exploring individual variables
+
+Next, we can explore the individual variables collected as part of the SIRS scoring system. First, I'll create a `plotHistogram()` function, which then can be called for each variable. I'll also create a `compareDistribution()` function to plot the kernel density estimate (KDE) by group.
+
+```{r eval=T, message=F, warning=F}
+# Plot histogram, given the dataframe, the x-data, and the title.
+plotHistogram <- function(d, xdata, title){
+  fig <- ggplot(data=d, aes(x=d[,xdata])) +
+    geom_histogram() + 
+    ggtitle(sprintf('Histogram of %s', title)) + xlab(title)
+}
+
+# Plot density plots of temperature, given the dataframe, the x-data, grouping variable, and the title.
+compareDistribution <- function(d, xdata, grouping_var, title){
+  fig <- ggplot(data=d, aes(x=d[,xdata], fill=d[,grouping_var])) +
+    geom_density(alpha=0.5) + 
+    scale_fill_discrete(name='Diagnosed sepsis') +
+    ylab('Kernel Density Estimate') + 
+    ggtitle(sprintf('Grouped KDE of %s', title)) + xlab(title)
+}
+```
+
+## Descriptive Statistics
+
+First, we'll generate some descriptive statistics for each variable using the `describe()` function from the `psych` package.
+
+```{r message=F, warning=F}
+statistics_of_interest = c('n', 'mean', 'sd', 'skew', 'kurtosis', 'median', 'IQR', 'min', 'max', 'range', 'se')
+tbl <- describe( cohort_data[, -which(names(cohort_data) %in% c('subject_id', 'icd9_code', 'septic'))], IQR=T) # get rid of ID vars
+kable(t(tbl[,statistics_of_interest]), digits=2, caption='Descriptive Statistics for Total Cohort') %>%
+  kable_styling(bootstrap_options='striped')
+```
+
+## Temperature
+
+The first variable on our list is temperature. We'll plot the histogram of the overall temperature and the the kernel density estimation of the two groups next to it.
+
+```{r eval=T, message=F, warning=F}
+ggarrange(
+  plotHistogram(cohort_data, 'temperature', 'Temperature (C)'),
+  compareDistribution(cohort_data, 'temperature', 'septic', 'Temperature (C)'),
+  ncol=2
+)
+```
+
+## Heart Rate
+
+```{r eval=T, message=F, warning=F}
+ggarrange(
+  plotHistogram(cohort_data, 'heartrate', 'Heart Rate (bpm)'),
+  compareDistribution(cohort_data, 'heartrate', 'septic', 'Heart Rate(bpm)'),
+  ncol=2
+)
+```
+
+## Respiratory Rate
+
+```{r eval=T, message=F, warning=F}
+ggarrange(
+  plotHistogram(cohort_data, 'resprate', 'Resp. Rate (bpm)'),
+  compareDistribution(cohort_data, 'resprate', 'septic', 'Resp. Rate (bpm)'),
+  ncol=2
+)
+```
+
+## Partial Pressure of Arterial CO_2_
+
+```{r eval=T, message=F, warning=F}
+ggarrange(
+  plotHistogram(cohort_data, 'paco2', 'PaCO2'),
+  compareDistribution(cohort_data, 'paco2', 'septic', 'PaCO2 (mmHg)'),
+  ncol=2
+)
+```
+
+## White Blood Cell Count
+
+```{r eval=T, message=F, warning=F}
+ggarrange(
+  plotHistogram(cohort_data, 'wbc', 'White Blood Cell Count (10^9/L)'),
+  compareDistribution(cohort_data, 'wbc', 'septic', 'White Blood Cell Count (10^9/L)'),
+  ncol=2
+)
+```
+
+# Things to try on your own:
+
+1. Which, if any, variables in the SIRS score have a significant difference between septic and non-septic patients?
+2. Calculate SIRS scores for all patients.
+3. How well does the SIRS score differentiate between septic and non-septic patients?
+4. Can you create a better classifier using this limited dataset?
+
+
+
+
+
+
